@@ -1,0 +1,1166 @@
+
+<!DOCTYPE html>
+
+<html lang="en">
+
+<head>
+
+    <meta charset="UTF-8">
+
+    <meta
+        name="viewport"
+        content="width=device-width, initial-scale=1.0"
+    >
+
+    <title>PrivateChat</title>
+
+    <link
+        rel="stylesheet"
+        href="{{ url_for('static', filename='style.css') }}"
+    >
+
+</head>
+
+<body>
+
+<div class="app">
+
+    <!-- SIDEBAR -->
+
+    <aside class="sidebar">
+
+        <div class="sidebar-top">
+
+            <div class="logo">
+                PrivateChat
+            </div>
+
+            <button
+                class="new-chat"
+                onclick="openAddChat()"
+            >
+                + New chat
+            </button>
+
+        </div>
+
+
+        <div class="my-id">
+
+            <span>Your Private ID</span>
+
+            <strong id="privateId">
+                {{ user.private_id }}
+            </strong>
+
+            <button onclick="copyPrivateId()">
+                Copy ID
+            </button>
+
+        </div>
+
+
+        <div
+            id="conversationList"
+            class="conversation-list"
+        >
+
+            <div class="empty">
+                No conversations yet.
+            </div>
+
+        </div>
+
+
+        <div class="account">
+
+            <div class="account-name">
+                {{ user.username }}
+            </div>
+
+            <a href="{{ url_for('logout') }}">
+                Logout
+            </a>
+
+        </div>
+
+    </aside>
+
+
+    <!-- CHAT -->
+
+    <main class="chat">
+
+        <div
+            id="welcome"
+            class="welcome"
+        >
+
+            <div class="welcome-icon">
+                💬
+            </div>
+
+            <h1>
+                Your private space
+            </h1>
+
+            <p>
+                Start a conversation using someone's
+                Private ID.
+            </p>
+
+            <button onclick="openAddChat()">
+                Start a chat
+            </button>
+
+        </div>
+
+
+        <div
+            id="chatScreen"
+            class="chat-screen hidden"
+        >
+
+            <header class="chat-header">
+
+                <div>
+
+                    <strong id="chatUsername">
+                        User
+                    </strong>
+
+                    <span id="chatPrivateId">
+                        Private ID
+                    </span>
+
+                </div>
+
+                <span class="connection">
+                    ● Connected
+                </span>
+
+            </header>
+
+
+            <div
+                id="messages"
+                class="messages"
+            >
+            </div>
+
+
+            <!-- COMPOSER -->
+
+            <div class="composer">
+
+                <!-- Hidden image/video picker -->
+
+                <input
+                    type="file"
+                    id="mediaInput"
+                    accept="image/*,video/*"
+                    hidden
+                    onchange="handleMediaSelected()"
+                >
+
+
+                <!-- Attachment button -->
+
+                <button
+                    type="button"
+                    class="attach-button"
+                    onclick="document.getElementById('mediaInput').click()"
+                    title="Add image or video"
+                >
+                    📎
+                </button>
+
+
+                <input
+                    id="messageInput"
+                    type="text"
+                    placeholder="Type a message..."
+                    maxlength="4000"
+                    autocomplete="off"
+                >
+
+
+                <button
+                    onclick="sendMessage()"
+                    id="sendButton"
+                >
+                    Send
+                </button>
+
+            </div>
+
+
+            <!-- Selected media preview -->
+
+            <div
+                id="mediaPreview"
+                class="media-preview hidden"
+            >
+
+                <div id="mediaPreviewContent"></div>
+
+                <button
+                    type="button"
+                    onclick="clearSelectedMedia()"
+                    class="remove-media"
+                >
+                    ×
+                </button>
+
+            </div>
+
+        </div>
+
+    </main>
+
+</div>
+
+
+<!-- ADD CHAT MODAL -->
+
+<div
+    id="addChatModal"
+    class="modal hidden"
+>
+
+    <div class="modal-card">
+
+        <button
+            class="close"
+            onclick="closeAddChat()"
+        >
+            ×
+        </button>
+
+        <h2>
+            Start a conversation
+        </h2>
+
+        <p>
+            Enter the other person's Private ID.
+        </p>
+
+        <input
+            id="privateIdInput"
+            type="text"
+            placeholder="XXXX-XXXX"
+            maxlength="9"
+        >
+
+        <div
+            id="modalError"
+            class="error hidden"
+        >
+        </div>
+
+        <button
+            onclick="addConversation()"
+        >
+            Find user
+        </button>
+
+    </div>
+
+</div>
+
+
+<script>
+
+let currentConversationId = null;
+
+let messagePoller = null;
+
+let lastMessageCount = 0;
+
+let selectedMedia = null;
+
+
+// ========================================================
+// LOAD CONVERSATIONS
+// ========================================================
+
+async function loadConversations() {
+
+    try {
+
+        const response = await fetch(
+            "/api/conversations"
+        );
+
+        if (!response.ok) {
+            return;
+        }
+
+        const conversations =
+            await response.json();
+
+        const list =
+            document.getElementById(
+                "conversationList"
+            );
+
+        list.innerHTML = "";
+
+        if (conversations.length === 0) {
+
+            list.innerHTML =
+                `<div class="empty">
+                    No conversations yet.
+                </div>`;
+
+            return;
+        }
+
+
+        conversations.forEach(
+            conversation => {
+
+                const item =
+                    document.createElement(
+                        "button"
+                    );
+
+                item.className =
+                    "conversation";
+
+                if (
+                    conversation.id ===
+                    currentConversationId
+                ) {
+
+                    item.classList.add(
+                        "active"
+                    );
+
+                }
+
+
+                const preview =
+                    conversation.last_message
+                    || "No messages yet";
+
+
+                item.innerHTML = `
+
+                    <div class="avatar">
+                        ${conversation.username
+                            .charAt(0)
+                            .toUpperCase()}
+                    </div>
+
+                    <div class="conversation-info">
+
+                        <strong>
+                            ${escapeHtml(
+                                conversation.username
+                            )}
+                        </strong>
+
+                        <span>
+                            ${escapeHtml(
+                                preview
+                            )}
+                        </span>
+
+                    </div>
+
+                `;
+
+
+                item.onclick =
+                    () => openConversation(
+                        conversation
+                    );
+
+
+                list.appendChild(item);
+
+            }
+        );
+
+    } catch (error) {
+
+        console.error(error);
+
+    }
+
+}
+
+
+// ========================================================
+// OPEN CONVERSATION
+// ========================================================
+
+async function openConversation(
+    conversation
+) {
+
+    currentConversationId =
+        conversation.id;
+
+    lastMessageCount = -1;
+
+    document
+        .getElementById("welcome")
+        .classList.add("hidden");
+
+    document
+        .getElementById("chatScreen")
+        .classList.remove("hidden");
+
+
+    document
+        .getElementById("chatUsername")
+        .textContent =
+        conversation.username;
+
+
+    document
+        .getElementById("chatPrivateId")
+        .textContent =
+        conversation.private_id;
+
+
+    await loadMessages();
+
+
+    if (messagePoller) {
+
+        clearInterval(
+            messagePoller
+        );
+
+    }
+
+
+    messagePoller =
+        setInterval(
+            loadMessages,
+            2000
+        );
+
+
+    loadConversations();
+
+}
+
+
+// ========================================================
+// LOAD MESSAGES
+// ========================================================
+
+async function loadMessages() {
+
+    if (!currentConversationId) {
+        return;
+    }
+
+
+    try {
+
+        const response =
+            await fetch(
+                `/api/messages/${currentConversationId}`
+            );
+
+
+        if (!response.ok) {
+            return;
+        }
+
+
+        const messages =
+            await response.json();
+
+
+        const container =
+            document.getElementById(
+                "messages"
+            );
+
+
+        if (
+            messages.length ===
+            lastMessageCount
+        ) {
+            return;
+        }
+
+
+        lastMessageCount =
+            messages.length;
+
+
+        container.innerHTML = "";
+
+
+        messages.forEach(
+            message => {
+
+                const bubble =
+                    document.createElement(
+                        "div"
+                    );
+
+
+                bubble.className =
+                    message.mine
+                    ? "message mine"
+                    : "message theirs";
+
+
+                const time =
+                    new Date(
+                        message.timestamp
+                    ).toLocaleTimeString(
+                        [],
+                        {
+                            hour: "2-digit",
+                            minute: "2-digit"
+                        }
+                    );
+
+
+                let content = "";
+
+
+                // IMAGE
+
+                if (
+                    message.message_type ===
+                    "image"
+                    &&
+                    message.media_url
+                ) {
+
+                    content += `
+
+                        <img
+                            src="${escapeAttribute(message.media_url)}"
+                            class="chat-image"
+                            loading="lazy"
+                            onclick="openMedia('${escapeAttribute(message.media_url)}')"
+                        >
+
+                    `;
+
+                }
+
+
+                // VIDEO
+
+                else if (
+                    message.message_type ===
+                    "video"
+                    &&
+                    message.media_url
+                ) {
+
+                    content += `
+
+                        <video
+                            class="chat-video"
+                            controls
+                            preload="metadata"
+                        >
+
+                            <source
+                                src="${escapeAttribute(message.media_url)}"
+                            >
+
+                        </video>
+
+                    `;
+
+                }
+
+
+                // TEXT
+
+                if (
+                    message.text
+                    &&
+                    message.text.trim()
+                ) {
+
+                    content += `
+
+                        <div class="message-text">
+                            ${escapeHtml(
+                                message.text
+                            )}
+                        </div>
+
+                    `;
+
+                }
+
+
+                bubble.innerHTML = `
+
+                    ${content}
+
+                    <div class="message-time">
+                        ${time}
+                    </div>
+
+                `;
+
+
+                container.appendChild(
+                    bubble
+                );
+
+            }
+        );
+
+
+        container.scrollTop =
+            container.scrollHeight;
+
+
+    } catch (error) {
+
+        console.error(error);
+
+    }
+
+}
+
+
+// ========================================================
+// SEND TEXT / MEDIA
+// ========================================================
+
+async function sendMessage() {
+
+    if (!currentConversationId) {
+        return;
+    }
+
+
+    const input =
+        document.getElementById(
+            "messageInput"
+        );
+
+
+    const text =
+        input.value.trim();
+
+
+    if (
+        !text &&
+        !selectedMedia
+    ) {
+
+        return;
+
+    }
+
+
+    const button =
+        document.getElementById(
+            "sendButton"
+        );
+
+
+    button.disabled = true;
+
+
+    try {
+
+        const formData =
+            new FormData();
+
+
+        formData.append(
+            "conversation_id",
+            currentConversationId
+        );
+
+
+        formData.append(
+            "text",
+            text
+        );
+
+
+        if (selectedMedia) {
+
+            formData.append(
+                "media",
+                selectedMedia
+            );
+
+        }
+
+
+        const response =
+            await fetch(
+                "/api/messages",
+                {
+                    method: "POST",
+                    body: formData
+                }
+            );
+
+
+        const data =
+            await response.json();
+
+
+        if (!response.ok) {
+
+            alert(
+                data.error ||
+                "Failed to send message."
+            );
+
+            return;
+
+        }
+
+
+        input.value = "";
+
+        clearSelectedMedia();
+
+        lastMessageCount = -1;
+
+        await loadMessages();
+
+        await loadConversations();
+
+
+    } catch (error) {
+
+        console.error(error);
+
+        alert(
+            "Could not connect to server."
+        );
+
+
+    } finally {
+
+        button.disabled = false;
+
+        input.focus();
+
+    }
+
+}
+
+
+// ========================================================
+// MEDIA SELECTED
+// ========================================================
+
+function handleMediaSelected() {
+
+    const input =
+        document.getElementById(
+            "mediaInput"
+        );
+
+
+    if (
+        !input.files ||
+        !input.files.length
+    ) {
+
+        return;
+
+    }
+
+
+    const file =
+        input.files[0];
+
+
+    const maxSize =
+        25 * 1024 * 1024;
+
+
+    if (file.size > maxSize) {
+
+        alert(
+            "Maximum file size is 25 MB."
+        );
+
+        input.value = "";
+
+        return;
+
+    }
+
+
+    if (
+        !file.type.startsWith("image/")
+        &&
+        !file.type.startsWith("video/")
+    ) {
+
+        alert(
+            "Only images and videos are supported."
+        );
+
+        input.value = "";
+
+        return;
+
+    }
+
+
+    selectedMedia = file;
+
+
+    const preview =
+        document.getElementById(
+            "mediaPreview"
+        );
+
+
+    const content =
+        document.getElementById(
+            "mediaPreviewContent"
+        );
+
+
+    content.innerHTML = "";
+
+
+    if (
+        file.type.startsWith("image/")
+    ) {
+
+        const image =
+            document.createElement(
+                "img"
+            );
+
+        image.src =
+            URL.createObjectURL(file);
+
+        image.className =
+            "preview-image";
+
+        content.appendChild(
+            image
+        );
+
+    } else {
+
+        const video =
+            document.createElement(
+                "video"
+            );
+
+        video.src =
+            URL.createObjectURL(file);
+
+        video.controls = true;
+
+        video.className =
+            "preview-video";
+
+        content.appendChild(
+            video
+        );
+
+    }
+
+
+    preview.classList.remove(
+        "hidden"
+    );
+
+}
+
+
+// ========================================================
+// CLEAR MEDIA
+// ========================================================
+
+function clearSelectedMedia() {
+
+    selectedMedia = null;
+
+
+    const input =
+        document.getElementById(
+            "mediaInput"
+        );
+
+
+    input.value = "";
+
+
+    document
+        .getElementById(
+            "mediaPreview"
+        )
+        .classList.add(
+            "hidden"
+        );
+
+
+    document
+        .getElementById(
+            "mediaPreviewContent"
+        )
+        .innerHTML = "";
+
+}
+
+
+// ========================================================
+// OPEN FULL MEDIA
+// ========================================================
+
+function openMedia(url) {
+
+    window.open(
+        url,
+        "_blank"
+    );
+
+}
+
+
+// ========================================================
+// ENTER TO SEND
+// ========================================================
+
+document
+    .getElementById("messageInput")
+    .addEventListener(
+        "keydown",
+        function(event) {
+
+            if (
+                event.key === "Enter"
+                &&
+                !event.shiftKey
+            ) {
+
+                event.preventDefault();
+
+                sendMessage();
+
+            }
+
+        }
+    );
+
+
+// ========================================================
+// ADD CHAT
+// ========================================================
+
+function openAddChat() {
+
+    document
+        .getElementById("addChatModal")
+        .classList.remove("hidden");
+
+    document
+        .getElementById("privateIdInput")
+        .focus();
+
+}
+
+
+function closeAddChat() {
+
+    document
+        .getElementById("addChatModal")
+        .classList.add("hidden");
+
+    document
+        .getElementById("modalError")
+        .classList.add("hidden");
+
+}
+
+
+async function addConversation() {
+
+    const input =
+        document.getElementById(
+            "privateIdInput"
+        );
+
+
+    const privateId =
+        input.value.trim();
+
+
+    const errorBox =
+        document.getElementById(
+            "modalError"
+        );
+
+
+    errorBox.classList.add(
+        "hidden"
+    );
+
+
+    if (!privateId) {
+
+        errorBox.textContent =
+            "Enter a Private ID.";
+
+        errorBox.classList.remove(
+            "hidden"
+        );
+
+        return;
+
+    }
+
+
+    try {
+
+        const response =
+            await fetch(
+                "/api/conversations",
+                {
+                    method: "POST",
+
+                    headers: {
+                        "Content-Type":
+                            "application/json"
+                    },
+
+                    body: JSON.stringify({
+                        private_id:
+                            privateId
+                    })
+                }
+            );
+
+
+        const data =
+            await response.json();
+
+
+        if (!response.ok) {
+
+            errorBox.textContent =
+                data.error ||
+                "Could not find user.";
+
+            errorBox.classList.remove(
+                "hidden"
+            );
+
+            return;
+
+        }
+
+
+        closeAddChat();
+
+        input.value = "";
+
+
+        await loadConversations();
+
+
+        openConversation(
+            data.conversation
+        );
+
+
+    } catch (error) {
+
+        console.error(error);
+
+        errorBox.textContent =
+            "Server connection failed.";
+
+        errorBox.classList.remove(
+            "hidden"
+        );
+
+    }
+
+}
+
+
+// ========================================================
+// COPY PRIVATE ID
+// ========================================================
+
+async function copyPrivateId() {
+
+    const id =
+        document.getElementById(
+            "privateId"
+        ).textContent.trim();
+
+
+    await navigator.clipboard.writeText(
+        id
+    );
+
+
+    alert(
+        "Private ID copied!"
+    );
+
+}
+
+
+// ========================================================
+// SECURITY
+// ========================================================
+
+function escapeHtml(value) {
+
+    return String(value)
+
+        .replaceAll("&", "&amp;")
+
+        .replaceAll("<", "&lt;")
+
+        .replaceAll(">", "&gt;")
+
+        .replaceAll('"', "&quot;")
+
+        .replaceAll("'", "&#039;");
+
+}
+
+
+function escapeAttribute(value) {
+
+    return String(value)
+        .replaceAll("&", "&amp;")
+        .replaceAll('"', "&quot;")
+        .replaceAll("'", "&#039;")
+        .replaceAll("<", "&lt;")
+        .replaceAll(">", "&gt;");
+
+}
+
+
+// ========================================================
+// INITIAL LOAD
+// ========================================================
+
+loadConversations();
+
+</script>
+
+</body>
+
+</html>
